@@ -12604,7 +12604,7 @@ let octokit = (function () {
   let request = async function (AUTH_KEY, locations, cursor) {
     try {
       const graphqlWithAuth = graphql.defaults(getHeader(AUTH_KEY))
-      const response = await graphqlWithAuth(getQuery(locations, 5, setCursor(cursor)))
+      const response = await graphqlWithAuth(getQuery(locations, 100, setCursor(cursor)))
       return new OctokitResponseModel(true, response)
     } catch (error) {
       console.log(error)
@@ -13775,6 +13775,7 @@ let requestOctokit = function () {
         let hasNextPage = true;
         let cursor = null;
         let array = [];
+        let seen = new Set();
         let iterations = 0;
         let errors = 0;
         for (; hasNextPage;) {
@@ -13783,6 +13784,11 @@ let requestOctokit = function () {
                 hasNextPage = octokitResponseModel.pageInfo.hasNextPage;
                 cursor = octokitResponseModel.pageInfo.endCursor;
                 for(const userDataModel of octokitResponseModel.node){
+                    if (seen.has(userDataModel.login)) {
+                        console.log(`skip duplicate: ${userDataModel.login}`);
+                        continue;
+                    }
+                    seen.add(userDataModel.login);
                     console.log(`iterations:(${iterations}) errors:(${errors}/${MAXIMUM_ERROR_ITERATIONS}) ${userDataModel.login} ${userDataModel.followers}`)
                     array.push(userDataModel)
                 }
