@@ -26,7 +26,7 @@ let Index = (function () {
   // const GITHUB_USERNAME_AND_REPOSITORY = 'gayanvoice/top-github-users';
   const AUTH_KEY = process.env.CUSTOM_TOKEN
   const GITHUB_USERNAME_AND_REPOSITORY = process.env.GITHUB_REPOSITORY
-  const MAXIMUM_ERROR_ITERATIONS = 20
+  const MAXIMUM_ERROR_ITERATIONS = 50
   let getCheckpoint = async function (locationsArray, country, checkpoint) {
     let indexOfTheCountry = locationsArray.findIndex((location) => location.country === country)
     if (indexOfTheCountry === checkpoint) {
@@ -53,16 +53,29 @@ let Index = (function () {
         )
         let readCacheResponseModel = await outputCache.readCacheFile(locationDataModel.country)
         if (readCacheResponseModel.status) {
-          if (readCacheResponseModel.users.length > json.length) {
-            console.log(
-              `octokit error cache:${readCacheResponseModel.users.length} octokit:${json.length}`
-            )
-          } else {
-            console.log(
-              `request success cache:${readCacheResponseModel.users.length} octokit:${json.length}`
-            )
-            await outputCache.saveCacheFile(locationDataModel.country, json)
+          // Merge new users with existing cache
+          const existingUsers = readCacheResponseModel.users
+          const newUsers = json
+
+          // Create a map of existing users by login
+          const userMap = new Map()
+          for (const user of existingUsers) {
+            userMap.set(user.login, user)
           }
+
+          // Add/update with new users (new data takes precedence)
+          for (const user of newUsers) {
+            userMap.set(user.login, user)
+          }
+
+          // Convert back to array and sort by followers descending
+          const mergedUsers = Array.from(userMap.values())
+            .sort((a, b) => b.followers - a.followers)
+
+          console.log(
+            `cache merged: existing:${existingUsers.length} new:${newUsers.length} merged:${mergedUsers.length}`
+          )
+          await outputCache.saveCacheFile(locationDataModel.country, mergedUsers)
         } else {
           console.log(`request success octokit:${json.length}`)
           await outputCache.saveCacheFile(locationDataModel.country, json)

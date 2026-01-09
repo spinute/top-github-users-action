@@ -1,6 +1,17 @@
 const { graphql } = require('@octokit/graphql')
 const OctokitResponseModel = require('../model/octokit/OctokitResponseModel')
 let octokit = (function () {
+  const REQUEST_TIMEOUT_MS = 30000 // 30 seconds timeout
+
+  let withTimeout = function (promise, ms) {
+    return Promise.race([
+      promise,
+      new Promise((_, reject) =>
+        setTimeout(() => reject(new Error(`Request timeout after ${ms}ms`)), ms)
+      )
+    ])
+  }
+
   let getHeader = function (AUTH_KEY) {
     return {
       headers: {
@@ -52,7 +63,10 @@ let octokit = (function () {
   let request = async function (AUTH_KEY, locations, cursor) {
     try {
       const graphqlWithAuth = graphql.defaults(getHeader(AUTH_KEY))
-      const response = await graphqlWithAuth(getQuery(locations, 10, setCursor(cursor)))
+      const response = await withTimeout(
+        graphqlWithAuth(getQuery(locations, 10, setCursor(cursor))),
+        REQUEST_TIMEOUT_MS
+      )
       return new OctokitResponseModel(true, response)
     } catch (error) {
       console.log(error)
