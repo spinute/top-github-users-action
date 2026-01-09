@@ -12553,6 +12553,17 @@ module.exports = git;
 const { graphql } = __nccwpck_require__(8467)
 const OctokitResponseModel = __nccwpck_require__(5857)
 let octokit = (function () {
+  const REQUEST_TIMEOUT_MS = 30000 // 30 seconds timeout
+
+  let withTimeout = function (promise, ms) {
+    return Promise.race([
+      promise,
+      new Promise((_, reject) =>
+        setTimeout(() => reject(new Error(`Request timeout after ${ms}ms`)), ms)
+      )
+    ])
+  }
+
   let getHeader = function (AUTH_KEY) {
     return {
       headers: {
@@ -12604,7 +12615,10 @@ let octokit = (function () {
   let request = async function (AUTH_KEY, locations, cursor) {
     try {
       const graphqlWithAuth = graphql.defaults(getHeader(AUTH_KEY))
-      const response = await graphqlWithAuth(getQuery(locations, 5, setCursor(cursor)))
+      const response = await withTimeout(
+        graphqlWithAuth(getQuery(locations, 10, setCursor(cursor))),
+        REQUEST_TIMEOUT_MS
+      )
       return new OctokitResponseModel(true, response)
     } catch (error) {
       console.log(error)
@@ -13775,6 +13789,7 @@ let requestOctokit = function () {
         let hasNextPage = true;
         let cursor = null;
         let array = [];
+        let seen = new Set();
         let iterations = 0;
         let errors = 0;
         for (; hasNextPage;) {
@@ -13783,6 +13798,11 @@ let requestOctokit = function () {
                 hasNextPage = octokitResponseModel.pageInfo.hasNextPage;
                 cursor = octokitResponseModel.pageInfo.endCursor;
                 for(const userDataModel of octokitResponseModel.node){
+                    if (seen.has(userDataModel.login)) {
+                        console.log(`skip duplicate: ${userDataModel.login}`);
+                        continue;
+                    }
+                    seen.add(userDataModel.login);
                     console.log(`iterations:(${iterations}) errors:(${errors}/${MAXIMUM_ERROR_ITERATIONS}) ${userDataModel.login} ${userDataModel.followers}`)
                     array.push(userDataModel)
                 }
@@ -13837,7 +13857,7 @@ let Index = (function () {
   // const GITHUB_USERNAME_AND_REPOSITORY = 'gayanvoice/top-github-users';
   const AUTH_KEY = process.env.CUSTOM_TOKEN
   const GITHUB_USERNAME_AND_REPOSITORY = process.env.GITHUB_REPOSITORY
-  const MAXIMUM_ERROR_ITERATIONS = 4
+  const MAXIMUM_ERROR_ITERATIONS = 50
   let getCheckpoint = async function (locationsArray, country, checkpoint) {
     let indexOfTheCountry = locationsArray.findIndex((location) => location.country === country)
     if (indexOfTheCountry === checkpoint) {
@@ -13864,16 +13884,29 @@ let Index = (function () {
         )
         let readCacheResponseModel = await outputCache.readCacheFile(locationDataModel.country)
         if (readCacheResponseModel.status) {
-          if (readCacheResponseModel.users.length > json.length) {
-            console.log(
-              `octokit error cache:${readCacheResponseModel.users.length} octokit:${json.length}`
-            )
-          } else {
-            console.log(
-              `request success cache:${readCacheResponseModel.users.length} octokit:${json.length}`
-            )
-            await outputCache.saveCacheFile(locationDataModel.country, json)
+          // Merge new users with existing cache
+          const existingUsers = readCacheResponseModel.users
+          const newUsers = json
+
+          // Create a map of existing users by login
+          const userMap = new Map()
+          for (const user of existingUsers) {
+            userMap.set(user.login, user)
           }
+
+          // Add/update with new users (new data takes precedence)
+          for (const user of newUsers) {
+            userMap.set(user.login, user)
+          }
+
+          // Convert back to array and sort by followers descending
+          const mergedUsers = Array.from(userMap.values())
+            .sort((a, b) => b.followers - a.followers)
+
+          console.log(
+            `cache merged: existing:${existingUsers.length} new:${newUsers.length} merged:${mergedUsers.length}`
+          )
+          await outputCache.saveCacheFile(locationDataModel.country, mergedUsers)
         } else {
           console.log(`request success octokit:${json.length}`)
           await outputCache.saveCacheFile(locationDataModel.country, json)
